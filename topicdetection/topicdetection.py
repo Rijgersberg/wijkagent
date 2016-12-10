@@ -1,6 +1,8 @@
 import re
 from time import time
 from datetime import datetime
+from collections import OrderedDict
+import pickle
 
 import numpy as np
 import pandas as pd
@@ -9,19 +11,31 @@ from gensim import corpora
 from sklearn import decomposition
 from sklearn.feature_extraction.text import TfidfVectorizer
 
+MODELID = 0
+STORED_CHATS = {}
+
 
 def main(group):
     load_data_and_calculate_topics(group)
 
 
-def load_data_and_calculate_topics(group):
+def load_data_and_calculate_topics(group, date_from=None, date_to=None):
     num_topics = 10
     num_top_words = 5
-    group_df, conversations, chatlog = load_data(group)
-    return get_topics(conversations, num_topics, num_top_words)
+    group_df, conversations, chatlog = load_data(group, date_from, date_to)
+
+    global MODELID
+    MODELID += 1
+
+    topic_words = get_topics(conversations, num_topics, num_top_words)
+    result = {'modelid': MODELID, 'topics': topic_words}
+    filename = 'stored_results/{}.pickle'.format(MODELID)
+    with open(filename, 'wb') as flo:
+        pickle.dump(result, flo)
+    return result
 
 
-def load_data(group):
+def load_data(group, date_from=None, date_to=None):
     chatlog_sets = {'floor': {'path': 'data/WhatsApp-chat floor_fixed.txt',
                           'date_pattern': 'nl-short',
                           'date_format': '%d-%m-%y, %H:%M'},
@@ -62,6 +76,12 @@ def load_data(group):
     df['timediff'] = (df['datetimes'] - df['datetimes'].shift()).fillna(0)
     df['conversation'] = (df['timediff'] > pd.Timedelta('4 hours')).cumsum() + 1
 
+    # date filter
+    if date_from is not None:
+        df = df.loc[df['datetimes'] >= date_from, :]
+    if date_to is not None:
+        df = df.loc[df['datetimes'] <= date_to, :]
+
     conversations = []
     for conversation_number in df['conversation'].unique():
         conversations.append(" ".join(df.loc[df['conversation'] == conversation_number, 'contents'].tolist()))
@@ -83,17 +103,17 @@ def get_topics(conversations, num_topics, num_top_words):
     clf = decomposition.NMF(n_components=num_topics, random_state=1)
     doctopic = clf.fit_transform(tfidf)
 
-    topic_words = []
-    for topic in clf.components_:
+    topic_words = OrderedDict()
+    for i, topic in enumerate(clf.components_, start=1):
         word_idx = np.argsort(topic)[::-1][0:num_top_words]
-        topic_words.append(['' + vocab[i] for i in word_idx])
+        topic_words[i]= ['' + vocab[i] for i in word_idx]
 
     print("")
     print("")
     print("========== Automatisch gevonden onderwerpen in de chat ==========")
     print("")
-    for t in range(len(topic_words)):
-        print("Onderwerp {}: {}".format(t + 1, ' | '.join(topic_words[t])))
+    for t, words in topic_words.items():
+        print("Onderwerp {}: {}".format(t, ' | '.join(words)))
     return topic_words
 
 
@@ -109,6 +129,7 @@ def strip_newlines(string, date_pattern='nl'):
     
     prog = re.compile(pattern)
     return prog.sub(' ', string)
+
 
 def get_stopwoorden():
     file = 'data/stopwoorden.txt'
