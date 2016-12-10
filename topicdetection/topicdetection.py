@@ -26,16 +26,16 @@ def load_data_and_calculate_topics(group, date_from=None, date_to=None):
     global MODELID
     MODELID += 1
 
-    topic_words, topic2doc = get_topics(conversations, num_topics, num_top_words)
+    topics = get_topics(group_df, conversations, num_topics, num_top_words)
     result = {'group': group,'modelid': MODELID,
-              'topics': topic_words}
+              'topics': topics}
     filename = 'stored_results/{}.pickle'.format(MODELID)
     with open(filename, 'wb') as flo:
         pickle.dump(result, flo)
 
     filename = 'stored_results/data_{}.pickle'.format(MODELID)
     with open(filename, 'wb') as flo:
-        pickle.dump({'group_df':group_df, 'topic2doc': topic2doc}, flo)
+        pickle.dump({'group_df':group_df}, flo)
     return result
 
 
@@ -55,7 +55,10 @@ def get_docs_for_topic(modelid, topic):
     cols_to_keep = ['datetimes', 'names', 'contents', 'conversation']
     df_filtered = group_df.loc[group_df['conversation'].isin(docs), cols_to_keep]
     return df_filtered.to_dict(orient='records')
-    
+
+
+def get_message_count(group_df, docs):
+    return len(group_df.loc[group_df['conversation'].isin(docs)])
 
 
 def load_data(group, date_from=None, date_to=None):
@@ -112,7 +115,7 @@ def load_data(group, date_from=None, date_to=None):
     return (df, conversations, chatlog)
 
 
-def get_topics(conversations, num_topics, num_top_words):
+def get_topics(group_df, conversations, num_topics, num_top_words):
     print("Extracting tf-idf features for NMF...")
     n_features = 10000
     stopwoorden = get_stopwoorden()
@@ -135,18 +138,20 @@ def get_topics(conversations, num_topics, num_top_words):
         topic2doc[topic].append(doc)
     topic2doc = dict(topic2doc)
 
-    topic_words = []
-    for i, topic in enumerate(clf.components_, start=1):
+    topics = []
+    for i, topic in enumerate(clf.components_):
         word_idx = np.argsort(topic)[::-1][0:num_top_words]
-        topic_words.append(['' + vocab[i] for i in word_idx])
+        topics.append({'terms': ['' + vocab[i] for i in word_idx],
+                            'conversationNrs': topic2doc[i],
+                            'messageCount': get_message_count(group_df, topic2doc[i])})
 
     print("")
     print("")
     print("========== Automatisch gevonden onderwerpen in de chat ==========")
     print("")
-    for t, words in enumerate(topic_words, start=1):
-        print("Onderwerp {}: {}".format(t, ' | '.join(words)))
-    return topic_words, topic2doc
+    for t, topic in enumerate(topics, start=1):
+        print("Onderwerp {}: {}".format(t, ' | '.join(topic['terms']))) 
+    return topics
 
 
 def strip_newlines(string, date_pattern='nl'):
