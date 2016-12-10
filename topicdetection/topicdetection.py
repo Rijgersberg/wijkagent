@@ -1,7 +1,7 @@
 import re
 from time import time
 from datetime import datetime
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 import pickle
 
 import numpy as np
@@ -12,7 +12,6 @@ from sklearn import decomposition
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 MODELID = 0
-STORED_CHATS = {}
 
 
 def main(group):
@@ -21,18 +20,42 @@ def main(group):
 
 def load_data_and_calculate_topics(group, date_from=None, date_to=None):
     num_topics = 10
-    num_top_words = 5
+    num_top_words = 3
     group_df, conversations, chatlog = load_data(group, date_from, date_to)
 
     global MODELID
     MODELID += 1
 
-    topic_words = get_topics(conversations, num_topics, num_top_words)
-    result = {'modelid': MODELID, 'topics': topic_words}
+    topic_words, topic2doc = get_topics(conversations, num_topics, num_top_words)
+    result = {'group': group,'modelid': MODELID,
+              'topics': topic_words}
     filename = 'stored_results/{}.pickle'.format(MODELID)
     with open(filename, 'wb') as flo:
         pickle.dump(result, flo)
+
+    filename = 'stored_results/data_{}.pickle'.format(MODELID)
+    with open(filename, 'wb') as flo:
+        pickle.dump({'group_df':group_df, 'topic2doc': topic2doc}, flo)
     return result
+
+
+def get_docs_for_topic(modelid, topic):
+    filename = 'stored_results/{}.pickle'.format(modelid)
+    with open(filename, 'rb') as flo:
+        result = pickle.load(flo)
+
+    filename = 'stored_results/data_{}.pickle'.format(modelid)
+    with open(filename, 'rb') as flo:
+        data = pickle.load(flo)
+        group_df = data['group_df']
+        topic2doc = data['topic2doc']
+    
+    print(topic2doc)
+    docs = topic2doc[topic]
+    cols_to_keep = ['datetimes', 'names', 'contents', 'conversation']
+    df_filtered = group_df.loc[group_df['conversation'].isin(docs), cols_to_keep]
+    return df_filtered.to_dict(orient='records')
+    
 
 
 def load_data(group, date_from=None, date_to=None):
@@ -54,7 +77,7 @@ def load_data(group, date_from=None, date_to=None):
                 }
     chatlog = chatlog_sets[group]
 
-    with open(chatlog['path']) as chatlog_file:
+    with open(chatlog['path'], encoding="utf8") as chatlog_file:
         chatlog_string = chatlog_file.read()
 
     chatlog_string = strip_newlines(chatlog_string, date_pattern=chatlog['date_pattern'])
@@ -93,7 +116,7 @@ def get_topics(conversations, num_topics, num_top_words):
     print("Extracting tf-idf features for NMF...")
     n_features = 10000
     stopwoorden = get_stopwoorden()
-    vectorizer = TfidfVectorizer(binary=False, max_df=0.7, ngram_range=(1, 3),
+    vectorizer = TfidfVectorizer(binary=False, max_df=0.7, ngram_range=(4, 4),
                                  max_features=n_features, stop_words=stopwoorden)
     t0 = time()
     tfidf = vectorizer.fit_transform(conversations)
@@ -103,18 +126,27 @@ def get_topics(conversations, num_topics, num_top_words):
     clf = decomposition.NMF(n_components=num_topics, random_state=1)
     doctopic = clf.fit_transform(tfidf)
 
-    topic_words = OrderedDict()
+    # doctopic = doctopic / np.sum(doctopic, axis=1, keepdims=True)
+    print(doctopic)
+
+    doc2topic = list(np.argmax(doctopic, axis=1))
+    topic2doc = defaultdict(list)
+    for doc, topic in enumerate(doc2topic):
+        topic2doc[topic].append(doc)
+    topic2doc = dict(topic2doc)
+
+    topic_words = []
     for i, topic in enumerate(clf.components_, start=1):
         word_idx = np.argsort(topic)[::-1][0:num_top_words]
-        topic_words[i]= ['' + vocab[i] for i in word_idx]
+        topic_words.append(['' + vocab[i] for i in word_idx])
 
     print("")
     print("")
     print("========== Automatisch gevonden onderwerpen in de chat ==========")
     print("")
-    for t, words in topic_words.items():
+    for t, words in enumerate(topic_words, start=1):
         print("Onderwerp {}: {}".format(t, ' | '.join(words)))
-    return topic_words
+    return topic_words, topic2doc
 
 
 def strip_newlines(string, date_pattern='nl'):

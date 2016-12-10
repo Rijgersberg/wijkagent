@@ -2,9 +2,10 @@ from datetime import datetime
 
 from flask import Flask, request, jsonify
 
-from topicdetection import load_data_and_calculate_topics
+from topicdetection import load_data_and_calculate_topics, get_docs_for_topic
 
 app = Flask(__name__)
+app.config['JSON_AS_ASCII'] = False
 
 
 @app.route('/')
@@ -26,6 +27,14 @@ def topics():
 
     topics = load_data_and_calculate_topics(group, date_from, date_to)
     return jsonify(topics)
+
+
+@app.route('/chats', methods=['GET'])
+def chats():
+    topic = int(request.args.get('topic'))
+    modelid = request.args.get('modelid')
+
+    return jsonify(get_docs_for_topic(modelid, topic))
     
 
 if __name__ == '__main__':
