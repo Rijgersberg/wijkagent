@@ -10,7 +10,18 @@ from sklearn import decomposition
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 
-def main():
+def main(group):
+    load_data_and_calculate_topics(group)
+
+
+def load_data_and_calculate_topics(group):
+    num_topics = 10
+    num_top_words = 5
+    group_df, conversations, chatlog = load_data(group)
+    return get_topics(conversations, num_topics, num_top_words)
+
+
+def load_data(group):
     chatlog_sets = {'floor': {'path': 'data/WhatsApp-chat floor_fixed.txt',
                           'date_pattern': 'nl-short',
                           'date_format': '%d-%m-%y, %H:%M'},
@@ -27,7 +38,7 @@ def main():
                           'date_pattern': 'nl-short',
                           'date_format': '%d-%m-%y, %H:%M'},
                 }
-    chatlog = chatlog_sets['werk']
+    chatlog = chatlog_sets[group]
 
     with open(chatlog['path']) as chatlog_file:
         chatlog_string = chatlog_file.read()
@@ -55,6 +66,10 @@ def main():
     for conversation_number in df['conversation'].unique():
         conversations.append(" ".join(df.loc[df['conversation'] == conversation_number, 'contents'].tolist()))
 
+    return (df, conversations, chatlog)
+
+
+def get_topics(conversations, num_topics, num_top_words):
     print("Extracting tf-idf features for NMF...")
     n_features = 10000
     stopwoorden = get_stopwoorden()
@@ -65,11 +80,9 @@ def main():
     vocab = np.array(vectorizer.get_feature_names())
     print("done in %0.3fs." % (time() - t0))
 
-    num_topics = 10
     clf = decomposition.NMF(n_components=num_topics, random_state=1)
     doctopic = clf.fit_transform(tfidf)
 
-    num_top_words = 5
     topic_words = []
     for topic in clf.components_:
         word_idx = np.argsort(topic)[::-1][0:num_top_words]
@@ -81,6 +94,7 @@ def main():
     print("")
     for t in range(len(topic_words)):
         print("Onderwerp {}: {}".format(t + 1, ' | '.join(topic_words[t])))
+    return topic_words
 
 
 def strip_newlines(string, date_pattern='nl'):
@@ -107,4 +121,4 @@ def parse_date(datestring, date_format):
 
 
 if __name__ == '__main__':
-    main()
+    main(group='eilandenbuurt_opgeheven')
