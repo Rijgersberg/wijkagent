@@ -32,6 +32,7 @@ ik
 in
 inzake
 is
+ja
 je
 jij
 met
@@ -42,6 +43,7 @@ niet
 no
 nu
 of
+oh
 om
 onder
 ons

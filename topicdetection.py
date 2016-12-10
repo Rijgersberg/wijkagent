@@ -1,5 +1,6 @@
 import re
 from time import time
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -11,91 +12,83 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 
 def main():
     chatlog_sets = {'floor': {'path': 'data/WhatsApp-chat floor_fixed.txt',
-                          'date_format': 'nl-short'},
+                          'date_pattern': 'nl-short',
+                          'date_format': '%d-%m-%y, %H:%M'},
                 'werk': {'path': 'data/WhatsApp Chat - werk.txt',
-                          'date_format': 'us'},
+                          'date_pattern': 'us',
+                          'date_format': '%d/%m/%Y, %H:%M:%S'},
                 'noodgroep': {'path': 'data/WhatsApp Chat - noodgroep.txt',
-                          'date_format': 'nl'},
-                          }
+                          'date_pattern': 'nl',
+                          'date_format': '%d-%m-%y %H:%M:%S'},
+                'eilandenbuurt': {'path': 'data/WhatsApp-chat met Eilandenbuurt Noord Oost.txt',
+                          'date_pattern': 'nl-short',
+                          'date_format': '%d-%m-%y, %H:%M'},
+                'eilandenbuurt_opgeheven': {'path': 'data/WhatsApp-chat met Opgeheven... Noord-Oost.txt',
+                          'date_pattern': 'nl-short',
+                          'date_format': '%d-%m-%y, %H:%M'},
+                }
     chatlog = chatlog_sets['werk']
 
     with open(chatlog['path']) as chatlog_file:
         chatlog_string = chatlog_file.read()
 
-    chatlog_string = strip_newlines(chatlog_string, date_format=chatlog['date_format'])
+    chatlog_string = strip_newlines(chatlog_string, date_pattern=chatlog['date_pattern'])
 
     contents = []
+    datetimes = []
+    names = []
     for line in chatlog_string.splitlines():
         try:
             datetime, name, content = line.strip().split(': ', 2)
+            datetimes.append(parse_date(datetime, chatlog['date_format']))
+            names.append(name)
             contents.append(content)
         except ValueError as e:
             print("Parse error:" + line)
 
     print(contents[:5])
+    df = pd.DataFrame(data={'datetimes': datetimes, 'names': names, 'contents': contents})
+    df['timediff'] = (df['datetimes'] - df['datetimes'].shift()).fillna(0)
+    df['conversation'] = (df['timediff'] > pd.Timedelta('4 hours')).cumsum() + 1
 
-    # stopwoorden = get_stopwoorden()
-    # texts = [[word for word in content.lower().split() if word not in stopwoorden]
-    #          for content in contents]
-
-    # dictionary = corpora.Dictionary(texts)
-    # corpus = [dictionary.doc2bow(text) for text in texts]
-    # ldamodel = gensim.models.ldamodel.LdaModel(corpus, num_topics=3, id2word=dictionary, passes=20)
-    # print(ldamodel.print_topics(num_topics=5, num_words=5))
+    conversations = []
+    for conversation_number in df['conversation'].unique():
+        conversations.append(" ".join(df.loc[df['conversation'] == conversation_number, 'contents'].tolist()))
 
     print("Extracting tf-idf features for NMF...")
     n_features = 10000
     stopwoorden = get_stopwoorden()
-    vectorizer = TfidfVectorizer(max_df=0.1, ngram_range=(1, 2), max_features=n_features, stop_words=stopwoorden)
+    vectorizer = TfidfVectorizer(binary=False, max_df=0.7, ngram_range=(1, 3),
+                                 max_features=n_features, stop_words=stopwoorden)
     t0 = time()
-    tfidf = vectorizer.fit_transform(contents)
+    tfidf = vectorizer.fit_transform(conversations)
     vocab = np.array(vectorizer.get_feature_names())
     print("done in %0.3fs." % (time() - t0))
 
     num_topics = 10
-    num_top_words = 20
     clf = decomposition.NMF(n_components=num_topics, random_state=1)
-
     doctopic = clf.fit_transform(tfidf)
 
+    num_top_words = 5
     topic_words = []
     for topic in clf.components_:
         word_idx = np.argsort(topic)[::-1][0:num_top_words]
         topic_words.append(['' + vocab[i] for i in word_idx])
 
     print("")
+    print("")
+    print("========== Automatisch gevonden onderwerpen in de chat ==========")
+    print("")
     for t in range(len(topic_words)):
-        print("Topic {}: {}".format(t + 1, ' | '.join(topic_words[t][:5])))
-
-    # # Use tf (raw term count) features for LDA.
-    # print("Extracting tf features for LDA...")
-    # tf_vectorizer = CountVectorizer(max_df=0.95, min_df=2,
-    #                                 max_features=n_features,
-    #                                 stop_words='english')
-    # t0 = time()
-    # tf = tf_vectorizer.fit_transform(data_samples)
-    # print("done in %0.3fs." % (time() - t0))
-
-    # Fit the NMF model
-    # print("Fitting the NMF model with tf-idf features, "
-    #       "n_samples=%d and n_features=%d..."
-    #       % (n_samples, n_features))
-    # t0 = time()
-    # nmf = NMF(n_components=n_topics, random_state=1,
-    #           alpha=.1, l1_ratio=.5).fit(tfidf)
-    # print("done in %0.3fs." % (time() - t0))
-
-    # print("\nTopics in NMF model:")
-    # tfidf_feature_names = tfidf_vectorizer.get_feature_names()
-    # print_top_words(nmf, tfidf_feature_names, n_top_words)
+        print("Onderwerp {}: {}".format(t + 1, ' | '.join(topic_words[t])))
 
 
-def strip_newlines(string, date_format='nl'):
-    if date_format == 'nl':
+def strip_newlines(string, date_pattern='nl'):
+    if date_pattern == 'nl':
         pattern = r'\n(?:(?!(\d{2}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})))'
-    elif date_format == 'nl-short':
+    elif date_pattern == 'nl-short':
         pattern = r'\n(?:(?!(\d{2}-\d{2}-\d{2}, \d{2}:\d{2})))'
-    elif date_format == 'us':
+    elif date_pattern == 'us':
         pattern = r'\n(?:(?!(\d{2}\/\d{2}\/\d{4}, \d{2}:\d{2}:\d{2})))'
     else:
         raise Exception('Unknown date_format')
@@ -109,11 +102,9 @@ def get_stopwoorden():
         return flo.read().splitlines() 
 
 
-def parse_dates(x):
-    return x
+def parse_date(datestring, date_format):
+    return datetime.strptime(datestring, date_format)
 
 
 if __name__ == '__main__':
     main()
-
-
